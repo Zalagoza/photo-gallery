@@ -1,10 +1,15 @@
 {
   "name": "photo-gallery",
   "private": true,
-  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
     "@vercel/blob": "^0.27.0",
+    "archiver": "^7.0.1",
     "jose": "^5.9.6",
     "next": "14.2.35",
     "react": "18.3.1",

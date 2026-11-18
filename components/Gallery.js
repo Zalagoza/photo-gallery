@@ -1,7 +1,10 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import Image from 'next/image';
 import Pager from './Pager';
 
+const MAX_SELECTION = 24;
+const WHATSAPP_URL = `https://wa.me/265996103277?text=${encodeURIComponent('Hi Kingsley, I am contacting you about my experience with KIA Mens Welfare Memoirs. My feedback or problem is: ')}`;
 const fmtSize = (b) => (!b ? '' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB');
 
 export default function Gallery() {
@@ -11,16 +14,44 @@ export default function Gallery() {
   const [preview, setPreview] = useState(null); // index within current page
   const [prog, setProg] = useState({}); // photoId -> 0..100 (or -1 = unknown size)
   const [name, setName] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [imageFallbacks, setImageFallbacks] = useState({});
 
   useEffect(() => { setName(localStorage.getItem('dl_name') || ''); }, []);
   useEffect(() => {
+    const controller = new AbortController();
     setData(null); setError('');
-    fetch(`/api/photos?page=${page}`)
-      .then((r) => r.json()).then(setData)
-      .catch(() => setError('Could not load photos. Check your connection and try again.'));
+    fetch(`/api/photos?page=${page}`, { signal: controller.signal })
+      .then(async (r) => {
+        const result = await r.json();
+        if (!r.ok) throw new Error(result.error || `Could not load photos (${r.status}).`);
+        return result;
+      })
+      .then(setData)
+      .catch((e) => {
+        if (e?.name !== 'AbortError') setError(e?.message || 'Could not load photos. Check your connection and try again.');
+      });
+    return () => controller.abort();
   }, [page]);
 
   const photos = data?.photos || [];
+  const allOnPageSelected = photos.length > 0 && photos.every((p) => selectedIds.includes(Number(p.id)));
+  const canSelectPage = allOnPageSelected || selectedIds.length + photos.filter((p) => !selectedIds.includes(Number(p.id))).length <= MAX_SELECTION;
+
+  const toggleSelection = (photoId) => {
+    setSelectedIds((current) => current.includes(photoId)
+      ? current.filter((id) => id !== photoId)
+      : current.length < MAX_SELECTION ? [...current, photoId] : current);
+  };
+
+  const togglePageSelection = () => {
+    const pageIds = photos.map((p) => Number(p.id));
+    if (pageIds.every((id) => selectedIds.includes(id))) {
+      setSelectedIds((current) => current.filter((id) => !pageIds.includes(id)));
+    } else if (selectedIds.length + pageIds.filter((id) => !selectedIds.includes(id)).length <= MAX_SELECTION) {
+      setSelectedIds((current) => [...new Set([...current, ...pageIds])]);
+    }
+  };
 
   const download = useCallback(async (p) => {
     if (prog[p.id] !== undefined) return;
@@ -79,37 +110,71 @@ export default function Gallery() {
   return (
     <div className="shell">
       <header className="top">
-        <h1>Photo Library</h1>
+        <h1>KIA Mens Welfare Memoirs</h1>
         <span className="count">{data ? `${data.total} photo${data.total === 1 ? '' : 's'}` : ''}</span>
       </header>
 
       <main className="canvas">
-        {error && <p className="msg">{error}</p>}
-        {!data && !error && <p className="msg">Loading photos…</p>}
+        {error && <p className="msg" role="alert">{error}</p>}
+        {!data && !error && <div className="grid loading-grid" aria-label="Loading photos" aria-live="polite">
+          {Array.from({ length: 8 }, (_, i) => <div className="skeleton-card" key={i}><div className="skeleton-image" /><div className="skeleton-line" /></div>)}
+        </div>}
         {data && photos.length === 0 && <p className="msg">No photos have been added yet.</p>}
+        {data && photos.length > 0 && <div className="gallery-tools">
+          <span>Choose photos to download them together as a ZIP.</span>
+          <button className="btn" onClick={togglePageSelection} disabled={!canSelectPage}>
+            {allOnPageSelected ? 'Deselect this page' : 'Select this page'}
+          </button>
+        </div>}
         <div className="grid">
-          {photos.map((p, i) => (
-            <figure className="cell" key={p.id}>
-              <button className="thumb" onClick={() => setPreview(i)} aria-label={`Preview ${p.title || p.filename}`}>
-                <img src={p.thumb_url} alt={p.title || p.filename} loading="lazy" />
-              </button>
-              <figcaption title={p.filename}>{p.title || p.filename}<small>{fmtSize(p.size)}</small></figcaption>
-              <div className="actions">
-                <button className="btn" onClick={() => setPreview(i)}>Preview</button>
-                <DlButton p={p} />
-              </div>
-            </figure>
-          ))}
+          {photos.map((p, i) => {
+            const photoId = Number(p.id);
+            const isSelected = selectedIds.includes(photoId);
+            return (
+              <figure className={`cell${isSelected ? ' selected' : ''}`} key={p.id}>
+                <div className="photo-media">
+                  <button className="thumb" onClick={() => setPreview(i)} aria-label={`Preview ${p.title || p.filename}`}>
+                    <Image
+                      src={imageFallbacks[photoId] ? p.url : (p.thumb_url || p.url)}
+                      alt={p.title || p.filename}
+                      width={360}
+                      height={270}
+                      sizes="(max-width: 520px) 44vw, (max-width: 800px) 29vw, 15vw"
+                      priority={i < 4}
+                      className="gallery-thumb-image"
+                      onError={() => setImageFallbacks((current) => ({ ...current, [photoId]: current[photoId] ? 'failed' : true }))}
+                      style={{ visibility: imageFallbacks[photoId] === 'failed' ? 'hidden' : 'visible' }}
+                    />
+                  </button>
+                  <label className={`select-toggle${isSelected ? ' is-selected' : ''}`}>
+                    <input type="checkbox" checked={isSelected} disabled={!isSelected && selectedIds.length >= MAX_SELECTION} onChange={() => toggleSelection(photoId)} aria-label={`Select ${p.title || p.filename}`} />
+                    <span>Select</span>
+                  </label>
+                </div>
+                <figcaption title={p.filename}>{p.title || p.filename}<small>{fmtSize(p.size)}</small></figcaption>
+                <div className="actions">
+                  <button className="btn" onClick={() => setPreview(i)}>Preview</button>
+                  <DlButton p={p} />
+                </div>
+              </figure>
+            );
+          })}
         </div>
       </main>
 
       <footer className="status">
-        <Pager page={page} pages={data?.pages || 1} onChange={(n) => { setPage(n); window.scrollTo({ top: 0 }); }} />
+        {selectedIds.length > 0 && <div className="bulk-actions" aria-live="polite">
+          <div className="bulk-summary"><strong>{selectedIds.length} selected</strong><small>Up to {MAX_SELECTION} photos per ZIP</small></div>
+          <button className="btn" onClick={() => setSelectedIds([])}>Clear</button>
+          <a className="btn primary" href={`/api/photos/archive?ids=${selectedIds.join(',')}`} target="_blank" rel="noopener noreferrer">Download ZIP</a>
+        </div>}
+        <Pager page={page} pages={data?.pages || 1} onChange={(n) => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         <label className="who">
           Your name (optional)
           <input value={name} maxLength={80} placeholder="e.g. Mr. Banda"
             onChange={(e) => { setName(e.target.value); localStorage.setItem('dl_name', e.target.value); }} />
         </label>
+        <div className="contact-footer"><span>Any problem Contact Kingsley Phiri Click </span><a href={WHATSAPP_URL} target="_blank" rel="noopener noreferrer">here</a></div>
       </footer>
 
       {preview !== null && photos[preview] && (

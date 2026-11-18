@@ -1,6 +1,6 @@
 import './globals.css';
 
-export const metadata = { title: 'Photo Library', description: 'Browse and download your photos' };
+export const metadata = { title: 'KIA Mens Welfare Memoirs', description: 'Browse and download KIA Mens Welfare Memoirs photos' };
 
 export default function RootLayout({ children }) {
   return (
